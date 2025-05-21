@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
-import { LogBox, StatusBar, View, TouchableOpacity } from 'react-native'; // Ajout de View et TouchableOpacity ici
+import { LogBox, StatusBar, View, TouchableOpacity, Platform } from 'react-native';
 
 // Importer le AuthProvider
 import { AuthProvider, useAuth } from './src/context/AuthContext';
@@ -17,6 +17,10 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import StoriesScreen from './src/screens/StoriesScreen';
 import FindFriendsScreen from './src/screens/FindFriendsScreen';
 import FriendsListScreen from './src/screens/FriendsListScreen';
+import { Camera } from 'expo-camera';
+import SnapViewerScreen from './src/screens/SnapViewerScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
+import PasswordResetScreen from './src/screens/PasswordResetScreen';
 
 // Ignorer certains avertissements non critiques
 LogBox.ignoreLogs([
@@ -27,7 +31,8 @@ LogBox.ignoreLogs([
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
-// Une version simplifiée sans CustomTabBar
+
+// Tabs de navigation principale
 const MainTabs = () => {
   return (
     <Tab.Navigator
@@ -70,15 +75,29 @@ const MainTabs = () => {
     </Tab.Navigator>
   );
 };
-// Configuration des stacks de navigation
+
+// Configuration des stacks de navigation principale
 const MainStack = () => {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Main" component={MainTabs} />
       <Stack.Screen name="ConversationScreen" component={ConversationScreen} />
       <Stack.Screen name="FindFriendsScreen" component={FindFriendsScreen} />
-            <Stack.Screen name="FriendsListScreen" component={FriendsListScreen} />
-
+      <Stack.Screen name="FriendsListScreen" component={FriendsListScreen} />
+      <Stack.Screen name="CameraScreen" component={CameraScreen} />
+      <Stack.Screen name="StoriesScreen" component={StoriesScreen} />
+      <Stack.Screen 
+        name="SnapViewerScreen" 
+        component={SnapViewerScreen}
+        options={{
+          presentation: 'fullScreenModal',
+          animationEnabled: true,
+          cardStyle: { backgroundColor: 'black' }
+        }}
+      />
+      {/* Ajouter les écrans qui manquaient au niveau racine */}
+      <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
+      <Stack.Screen name="PasswordReset" component={PasswordResetScreen} />
     </Stack.Navigator>
   );
 };

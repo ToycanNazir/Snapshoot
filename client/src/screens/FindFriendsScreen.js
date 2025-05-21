@@ -30,7 +30,7 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Créer un client API pour la fonction de recherche
-const API_BASE_URL = 'http://192.168.1.50:8080'; 
+const API_BASE_URL = 'http://192.168.1.88:8080'; 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {

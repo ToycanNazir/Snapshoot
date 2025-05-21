@@ -20,7 +20,7 @@ export const initWebSocket = async () => {
     }
     
     // URL du serveur WebSocket (à adapter selon votre configuration)
-    const wsUrl = `ws://192.168.1.50:8080/api/ws?token=${token}`;
+    const wsUrl = `ws://192.168.1.88:8080/api/ws?token=${token}`;
     
     // Créer une nouvelle connexion WebSocket
     socket = new WebSocket(wsUrl);

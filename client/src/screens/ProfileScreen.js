@@ -10,22 +10,32 @@ import {
   TextInput,
   Alert,
   Switch,
-  ActivityIndicator
+  ActivityIndicator,
+  Modal
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
 import { uploadProfileImage } from '../services/storage';
+import { useNavigation, CommonActions } from '@react-navigation/native'; // Ajoutez CommonActions
+import AsyncStorage from '@react-native-async-storage/async-storage'; // Ajoutez cette importation si elle manque
 
-const ProfileScreen = ({ navigation }) => {
+const ProfileScreen = () => {
+  const navigation = useNavigation();
   const { user, userProfile, signOut, updateProfile, refreshProfile } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [profileImage, setProfileImage] = useState('');
   const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
   const [location, setLocation] = useState('');
+  const [notifications, setNotifications] = useState(false);
+  const [locationSharing, setLocationSharing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadAttempts, setLoadAttempts] = useState(0);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  
+  // Un chargement général court (2 secondes max) au lieu d'attendre indéfiniment
+  const [initialLoading, setInitialLoading] = useState(true);
   
   // Utiliser les infos de l'utilisateur même sans profil complet
   useEffect(() => {
@@ -35,6 +45,8 @@ const ProfileScreen = ({ navigation }) => {
       setUsername(userProfile.display_name || (user?.email?.split('@')[0] || 'Utilisateur'));
       setBio(userProfile.bio || '');
       setLocation(userProfile.location || '');
+      setNotifications(userProfile.notifications || false);
+      setLocationSharing(userProfile.location_sharing || false);
     } 
     // Sinon, utiliser les informations de base de l'utilisateur
     else if (user) {
@@ -48,30 +60,16 @@ const ProfileScreen = ({ navigation }) => {
         refreshProfile().catch(err => console.error('Erreur lors du rafraîchissement:', err));
       }
     }
-  }, [userProfile, user, loadAttempts]);
-  
-  // IMPORTANT: Ne jamais bloquer l'affichage à cause d'un profil manquant
-  // Supprimez cette condition qui cause l'écran de chargement infini
-  // if (!userProfile) {
-  //   return (
-  //     <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-  //       <ActivityIndicator size="large" color="#6C13B3" />
-  //     </View>
-  //   );
-  // }
-  
-  // Un chargement général court (2 secondes max) au lieu d'attendre indéfiniment
-  const [initialLoading, setInitialLoading] = useState(true);
-  
-  useEffect(() => {
-    // Définir un timeout pour s'assurer que l'écran s'affiche après 2 secondes max
+    
+    // Dans tous les cas, arrêter le chargement initial après 2 secondes max
     const timeout = setTimeout(() => {
       setInitialLoading(false);
     }, 2000);
     
     return () => clearTimeout(timeout);
-  }, []);
+  }, [userProfile, user, loadAttempts]);
   
+  // Afficher un loader court au démarrage, mais ne pas attendre userProfile indéfiniment
   if (initialLoading) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
@@ -79,7 +77,14 @@ const ProfileScreen = ({ navigation }) => {
       </View>
     );
   }
-
+  const navigateToSettings = () => {
+    // Utiliser CommonActions pour une navigation robuste entre navigateurs imbriqués
+    navigation.dispatch(
+      CommonActions.navigate({
+        name: 'SettingsScreen',
+      })
+    );
+  };
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     
@@ -109,25 +114,65 @@ const ProfileScreen = ({ navigation }) => {
     }
   };
   
+  const removeProfileImage = async () => {
+    if (!profileImage) return;
+    
+    Alert.alert(
+      'Supprimer la photo',
+      'Êtes-vous sûr de vouloir supprimer votre photo de profil ?',
+      [
+        {
+          text: 'Annuler',
+          style: 'cancel',
+        },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              
+              // Mettre à jour le profil sans image
+              await updateProfile({ profile_image: null });
+              
+              setProfileImage('');
+              Alert.alert('Succès', 'Photo de profil supprimée');
+            } catch (error) {
+              console.error('Erreur lors de la suppression de l\'image:', error);
+              Alert.alert('Erreur', 'Impossible de supprimer votre photo de profil');
+            } finally {
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+  
   const saveProfile = async () => {
     try {
       setLoading(true);
-      const { error } = await updateProfile({
+      
+      const profileData = {
         display_name: username,
         bio,
         profile_image: profileImage,
-        location
-      });
+        location,
+        notifications,
+        location_sharing: locationSharing
+      };
       
-      if (error) {
-        Alert.alert('Erreur', error.message || 'Impossible de mettre à jour votre profil');
-      } else {
+      const updatedProfile = await updateProfile(profileData);
+      
+      if (updatedProfile) {
         setIsEditing(false);
         Alert.alert('Succès', 'Profil mis à jour avec succès');
+      } else {
+        Alert.alert('Erreur', 'Impossible de mettre à jour votre profil');
       }
     } catch (error) {
       console.error('Erreur lors de la mise à jour du profil:', error);
-      Alert.alert('Erreur', 'Impossible de mettre à jour votre profil');
+      Alert.alert('Erreur', error.message || 'Impossible de mettre à jour votre profil');
     } finally {
       setLoading(false);
     }
@@ -136,19 +181,67 @@ const ProfileScreen = ({ navigation }) => {
   const handleLogout = async () => {
     try {
       await signOut();
+      // Naviguer vers l'écran de connexion si ce n'est pas géré automatiquement
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
     } catch (error) {
       console.error('Erreur lors de la déconnexion:', error);
       Alert.alert('Erreur', 'Impossible de se déconnecter');
     }
   };
   
-  if (!userProfile) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#6C13B3" />
-      </View>
-    );
-  }
+  const confirmDeleteAccount = () => {
+    setShowDeleteConfirm(true);
+  };
+  
+  const handleDeleteAccount = async () => {
+    try {
+      setLoading(true);
+      
+      // Appel à l'API pour supprimer le compte
+      const response = await fetch('http://192.168.1.88:8080/api/users/me', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${await AsyncStorage.getItem('auth_token')}`
+        }
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.message || `Erreur ${response.status}`);
+      }
+      
+      // Déconnexion
+      await signOut();
+      
+      // Navigation vers l'écran de connexion
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+      
+      Alert.alert('Compte supprimé', 'Votre compte a été supprimé avec succès');
+    } catch (error) {
+      console.error('Erreur lors de la suppression du compte:', error);
+      Alert.alert('Erreur', error.message || 'Impossible de supprimer votre compte');
+    } finally {
+      setLoading(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+  
+  // Ne pas attendre indéfiniment le profil
+  // if (!userProfile) {
+  //   return (
+  //     <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+  //       <ActivityIndicator size="large" color="#6C13B3" />
+  //     </View>
+  //   );
+  // }
   
   return (
     <ScrollView style={styles.container}>
@@ -168,12 +261,17 @@ const ProfileScreen = ({ navigation }) => {
           </View>
         ) : (
           <View style={styles.headerButtons}>
-            <TouchableOpacity 
-              style={styles.settingsButton}
-              onPress={() => navigation.navigate('SettingsScreen')}
-            >
-              <Ionicons name="settings-outline" size={24} color="#333" />
-            </TouchableOpacity>
+         <TouchableOpacity 
+  style={styles.settingsButton}
+  onPress={() => {
+    // Navigation explicite pour les navigateurs imbriqués
+    navigation.navigate('ProfileMain', { 
+      screen: 'SettingsScreen' 
+    });
+  }}
+>
+  <Ionicons name="settings-outline" size={24} color="#333" />
+</TouchableOpacity>
             <TouchableOpacity 
               style={styles.editButton}
               onPress={() => setIsEditing(true)}
@@ -189,6 +287,7 @@ const ProfileScreen = ({ navigation }) => {
           style={styles.profileImageContainer} 
           onPress={isEditing ? pickImage : null}
           disabled={loading}
+          onLongPress={isEditing && profileImage ? removeProfileImage : null}
         >
           {profileImage ? (
             <Image 
@@ -204,6 +303,14 @@ const ProfileScreen = ({ navigation }) => {
           {isEditing && (
             <View style={styles.editImageOverlay}>
               <Ionicons name="camera" size={24} color="white" />
+            </View>
+          )}
+          
+          {isEditing && profileImage && (
+            <View style={styles.removeImageOverlay}>
+              <TouchableOpacity onPress={removeProfileImage}>
+                <Ionicons name="trash-outline" size={18} color="white" />
+              </TouchableOpacity>
             </View>
           )}
         </TouchableOpacity>
@@ -229,7 +336,7 @@ const ProfileScreen = ({ navigation }) => {
               <Text style={styles.statNumber}>0</Text>
               <Text style={styles.statLabel}>Stories</Text>
             </View>
-            </View>
+          </View>
         </View>
       </View>
       
@@ -312,19 +419,66 @@ const ProfileScreen = ({ navigation }) => {
         
         <TouchableOpacity 
           style={styles.actionButton}
-          onPress={() => navigation.navigate('MyStoriesScreen')}
+          onPress={() => navigation.navigate('StoriesScreen')}
         >
           <Ionicons name="play-circle-outline" size={24} color="#6C13B3" />
           <Text style={styles.actionButtonText}>Mes stories</Text>
         </TouchableOpacity>
       </View>
       
-      <TouchableOpacity 
-        style={styles.logoutButton}
-        onPress={handleLogout}
+      <View style={styles.accountActions}>
+        <TouchableOpacity 
+          style={styles.logoutButton}
+          onPress={handleLogout}
+        >
+          <Text style={styles.logoutButtonText}>Déconnexion</Text>
+        </TouchableOpacity>
+        
+        {isEditing && (
+          <TouchableOpacity 
+            style={styles.deleteAccountButton}
+            onPress={confirmDeleteAccount}
+          >
+            <Text style={styles.deleteAccountButtonText}>Supprimer mon compte</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      
+      {/* Modal de confirmation pour la suppression du compte */}
+      <Modal
+        visible={showDeleteConfirm}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowDeleteConfirm(false)}
       >
-        <Text style={styles.logoutButtonText}>Déconnexion</Text>
-      </TouchableOpacity>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Supprimer votre compte ?</Text>
+            <Text style={styles.modalMessage}>
+              Cette action est irréversible. Toutes vos données personnelles, photos et contenus seront définitivement supprimés.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.cancelModalButton]}
+                onPress={() => setShowDeleteConfirm(false)}
+              >
+                <Text style={styles.cancelModalButtonText}>Annuler</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.modalButton, styles.deleteModalButton]}
+                onPress={handleDeleteAccount}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.deleteModalButtonText}>Supprimer</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
@@ -337,7 +491,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    padding: 15,
+    padding: 50,
   },
   headerButtons: {
     flexDirection: 'row',
@@ -394,6 +548,17 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  removeImageOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    backgroundColor: 'rgba(231, 76, 60, 0.8)',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -502,8 +667,11 @@ const styles = StyleSheet.create({
     marginLeft: 15,
     fontSize: 16,
   },
+  accountActions: {
+    padding: 20,
+  },
   logoutButton: {
-    margin: 20,
+    marginBottom: 15,
     padding: 15,
     borderRadius: 8,
     backgroundColor: '#f0f0f0',
@@ -513,6 +681,67 @@ const styles = StyleSheet.create({
     color: '#e74c3c',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  deleteAccountButton: {
+    padding: 15,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e74c3c',
+    alignItems: 'center',
+  },
+  deleteAccountButtonText: {
+    color: '#e74c3c',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 15,
+    color: '#e74c3c',
+  },
+  modalMessage: {
+    fontSize: 16,
+    marginBottom: 20,
+    lineHeight: 22,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  modalButton: {
+    padding: 15,
+    borderRadius: 8,
+    width: '48%',
+    alignItems: 'center',
+  },
+  cancelModalButton: {
+    backgroundColor: '#f0f0f0',
+  },
+  cancelModalButtonText: {
+    color: '#333',
+    fontWeight: 'bold',
+  },
+  deleteModalButton: {
+    backgroundColor: '#e74c3c',
+  },
+  deleteModalButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
   },
 });
 

@@ -3,7 +3,7 @@
 // Configuration de l'API
 export const API_CONFIG = {
   // URL de base de l'API qui peut être facilement changée à un seul endroit
-  BASE_URL: "http://192.168.1.50:8080", // Remplacez par votre IP réelle ou une variable d'environnement
+  BASE_URL: "http://192.168.1.88:8080", // Remplacez par votre IP réelle ou une variable d'environnement
   TIMEOUT: 15000, // 15 secondes
   
   // Points de terminaison de l'API
