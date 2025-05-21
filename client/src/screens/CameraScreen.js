@@ -1,4 +1,3 @@
-// src/screens/CameraScreen.js
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -11,7 +10,9 @@ import {
   Alert,
   Platform,
   FlatList,
-  ActivityIndicator
+  ActivityIndicator,
+  TextInput,
+  Modal
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,9 +20,10 @@ import * as MediaLibrary from 'expo-media-library';
 import { useAuth } from '../context/AuthContext';
 import { getFriends } from '../api/friendsApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
+import { publishStory } from '../api/storiesApi';
 // Clé pour stocker les médias envoyés
 const SENT_MEDIA_KEY = 'sent_media_';
+const USER_STORIES_KEY = 'user_stories_';
 
 const CameraScreen = ({ route, navigation }) => {
   const { user } = useAuth();
@@ -29,12 +31,16 @@ const CameraScreen = ({ route, navigation }) => {
   const [hasPermissions, setHasPermissions] = useState(null);
   const [friends, setFriends] = useState([]);
   const [showFriendSelector, setShowFriendSelector] = useState(false);
+  const [showStoryEditor, setShowStoryEditor] = useState(false);
+  const [storyCaption, setStoryCaption] = useState('');
   const [sending, setSending] = useState(false);
   const [loadingFriends, setLoadingFriends] = useState(false);
+  const [savingStory, setSavingStory] = useState(false);
   
   // Vérifier si l'écran est appelé depuis ConversationScreen ou comme tab
   const isModal = route?.params?.fromConversation;
   const conversationId = route?.params?.conversationId;
+  const fromStories = route?.params?.fromStories; // Nouveau paramètre pour les stories
 
   // Charger la liste des amis
   const loadFriends = useCallback(async () => {
@@ -65,7 +71,7 @@ const CameraScreen = ({ route, navigation }) => {
     // Vérifier les permissions immédiatement au chargement
     checkPermissions();
     
-    // Si on est sur l'écran principal (tab caméra), ouvrir directement la caméra
+    // Si on est sur l'écran principal (tab caméra) ou depuis stories, ouvrir directement la caméra
     if (!isModal) {
       setTimeout(() => {
         openCamera();
@@ -111,10 +117,11 @@ const CameraScreen = ({ route, navigation }) => {
     
     try {
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.All, // Permet images et vidéos
         allowsEditing: true,
-        aspect: [4, 3],
+        aspect: [9, 16], // Format portrait pour stories
         quality: 0.8,
+        videoMaxDuration: 30, // Limite vidéo à 30 secondes pour stories
         // Présentation personnalisée pour ressembler davantage à Snapchat
         presentationStyle: Platform.OS === 'ios' ? 'fullScreen' : undefined,
       });
@@ -122,18 +129,21 @@ const CameraScreen = ({ route, navigation }) => {
       console.log('Résultat ImagePicker:', result);
       
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        const imageUri = result.assets[0].uri;
+        const mediaUri = result.assets[0].uri;
+        const mediaType = result.assets[0].type;
         
-        if (isModal) {
-          // Si appelé depuis la conversation, montrer la prévisualisation
-          setCapturedImage(imageUri);
-        } else {
-          // Si appelé depuis l'onglet, montrer la prévisualisation avec option d'envoi aux amis
-          setCapturedImage(imageUri);
+        setCapturedImage({ uri: mediaUri, type: mediaType });
+        
+        // Si appelé depuis Stories, ouvrir directement l'éditeur de story
+        if (fromStories) {
+          setShowStoryEditor(true);
         }
-      } else if (!isModal) {
+      } else if (!isModal && !fromStories) {
         // Si annulé depuis l'onglet, retourner à l'onglet principal
         navigation.navigate('Main');
+      } else if (fromStories) {
+        // Si annulé depuis stories, retourner aux stories
+        navigation.navigate('Stories');
       }
     } catch (error) {
       console.error('Erreur lors de l\'ouverture de la caméra:', error);
@@ -148,14 +158,23 @@ const CameraScreen = ({ route, navigation }) => {
     
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.All, // Permet images et vidéos
         allowsEditing: true,
-        aspect: [4, 3],
+        aspect: [9, 16], // Format portrait pour stories
         quality: 0.8,
+        videoMaxDuration: 30,
       });
       
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setCapturedImage(result.assets[0].uri);
+        const mediaUri = result.assets[0].uri;
+        const mediaType = result.assets[0].type;
+        
+        setCapturedImage({ uri: mediaUri, type: mediaType });
+        
+        // Si appelé depuis Stories, ouvrir directement l'éditeur de story
+        if (fromStories) {
+          setShowStoryEditor(true);
+        }
       }
     } catch (error) {
       console.error('Erreur lors de l\'ouverture de la galerie:', error);
@@ -167,11 +186,52 @@ const CameraScreen = ({ route, navigation }) => {
     if (!capturedImage) return;
     
     try {
-      await MediaLibrary.createAssetAsync(capturedImage);
-      Alert.alert("Succès", "Photo enregistrée dans la galerie");
+      await MediaLibrary.createAssetAsync(capturedImage.uri);
+      Alert.alert("Succès", "Média enregistré dans la galerie");
     } catch (error) {
       console.error("Erreur lors de la sauvegarde:", error);
-      Alert.alert("Erreur", "Impossible d'enregistrer la photo");
+      Alert.alert("Erreur", "Impossible d'enregistrer le média");
+    }
+  };
+
+  // Importer la fonction publishStory de l'API
+
+
+  // Fonction pour publier une story
+  const publishStoryHandler = async () => {
+    if (!capturedImage) return;
+    
+    setSavingStory(true);
+    
+    try {
+      // Utiliser l'API pour publier la story
+      const newStory = await publishStory(
+        user.id,
+        user.username || user.email,
+        user.avatar_url || 'https://randomuser.me/api/portraits/lego/1.jpg',
+        capturedImage.uri, 
+        capturedImage.type,
+        storyCaption
+      );
+      
+      if (newStory) {
+        Alert.alert("Succès", "Votre story a été publiée !");
+        
+        // Réinitialiser l'état
+        setCapturedImage(null);
+        setStoryCaption('');
+        setShowStoryEditor(false);
+        
+        // Retourner aux stories pour voir la nouvelle story
+        navigation.navigate('Stories');
+      } else {
+        throw new Error('Échec de la publication');
+      }
+    } catch (error) {
+      console.error("Erreur lors de la publication de la story:", error);
+      Alert.alert("Erreur", "Impossible de publier votre story");
+    } finally {
+      setSavingStory(false);
     }
   };
 
@@ -238,10 +298,10 @@ const CameraScreen = ({ route, navigation }) => {
       await new Promise(resolve => setTimeout(resolve, 1500));
       
       // Enregistrer dans l'historique des médias envoyés
-      await saveSentMedia(capturedImage, selectedFriends);
+      await saveSentMedia(capturedImage.uri, selectedFriends);
       
       const friendNames = selectedFriends.map(f => f.username || f.display_name).join(', ');
-      Alert.alert("Succès", `Photo envoyée à ${friendNames}`);
+      Alert.alert("Succès", `Média envoyé à ${friendNames}`);
       
       // Réinitialiser l'état
       setCapturedImage(null);
@@ -258,7 +318,7 @@ const CameraScreen = ({ route, navigation }) => {
       }
     } catch (error) {
       console.error("Erreur lors de l'envoi:", error);
-      Alert.alert("Erreur", "Impossible d'envoyer la photo");
+      Alert.alert("Erreur", "Impossible d'envoyer le média");
     } finally {
       setSending(false);
     }
@@ -270,7 +330,7 @@ const CameraScreen = ({ route, navigation }) => {
       navigation.navigate({
         name: 'ConversationScreen',
         params: { 
-          capturedImage: capturedImage,
+          capturedImage: capturedImage.uri,
           conversationId: conversationId
         },
         merge: true
@@ -281,6 +341,8 @@ const CameraScreen = ({ route, navigation }) => {
   const retakePicture = () => {
     setCapturedImage(null);
     setShowFriendSelector(false);
+    setShowStoryEditor(false);
+    setStoryCaption('');
     openCamera();
   };
 
@@ -305,6 +367,93 @@ const CameraScreen = ({ route, navigation }) => {
     </TouchableOpacity>
   );
 
+  // Modal pour l'éditeur de story
+  const renderStoryEditor = () => (
+    <Modal
+      visible={showStoryEditor}
+      animationType="slide"
+      presentationStyle="fullScreen"
+    >
+      <SafeAreaView style={styles.storyEditorContainer}>
+        <StatusBar barStyle="light-content" backgroundColor="#000" />
+        
+        {/* Header de l'éditeur */}
+        <View style={styles.storyEditorHeader}>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => {
+              setShowStoryEditor(false);
+              setStoryCaption('');
+            }}
+          >
+            <Ionicons name="close" size={28} color="white" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Votre Story</Text>
+          <TouchableOpacity 
+            style={styles.publishButton}
+            onPress={publishStoryHandler}
+            disabled={savingStory}
+          >
+            {savingStory ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <Text style={styles.publishButtonText}>Publier</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Prévisualisation du média */}
+        <View style={styles.storyPreviewContainer}>
+          {capturedImage?.type === 'video' ? (
+            <View style={styles.videoPreview}>
+              <Ionicons name="play-circle" size={60} color="white" />
+              <Text style={styles.videoText}>Vidéo prête</Text>
+            </View>
+          ) : (
+            <Image 
+              source={{ uri: capturedImage?.uri }} 
+              style={styles.storyPreview}
+              resizeMode="cover"
+            />
+          )}
+          
+          {/* Zone de saisie de texte par-dessus l'image */}
+          <View style={styles.captionOverlay}>
+            <TextInput
+              style={styles.captionInput}
+              placeholder="Ajoutez un texte à votre story..."
+              placeholderTextColor="rgba(255, 255, 255, 0.7)"
+              value={storyCaption}
+              onChangeText={setStoryCaption}
+              multiline
+              maxLength={200}
+              textAlignVertical="center"
+            />
+          </View>
+        </View>
+
+        {/* Options en bas */}
+        <View style={styles.storyEditorActions}>
+          <TouchableOpacity 
+            style={styles.editorActionButton}
+            onPress={saveToGallery}
+          >
+            <Ionicons name="download" size={24} color="white" />
+            <Text style={styles.actionButtonText}>Sauvegarder</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.editorActionButton}
+            onPress={retakePicture}
+          >
+            <Ionicons name="refresh" size={24} color="white" />
+            <Text style={styles.actionButtonText}>Reprendre</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+
   // Si on montre le sélecteur d'amis
   if (showFriendSelector && capturedImage) {
     return (
@@ -323,7 +472,7 @@ const CameraScreen = ({ route, navigation }) => {
         </View>
         
         <Image 
-          source={{ uri: capturedImage }} 
+          source={{ uri: capturedImage.uri }} 
           style={styles.thumbnailPreview}
         />
         
@@ -385,12 +534,12 @@ const CameraScreen = ({ route, navigation }) => {
   }
 
   // Si on a capturé une image, afficher la prévisualisation
-  if (capturedImage) {
+  if (capturedImage && !showStoryEditor) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#000" />
         <Image 
-          source={{ uri: capturedImage }} 
+          source={{ uri: capturedImage.uri }} 
           style={styles.preview}
           resizeMode="contain"
         />
@@ -411,7 +560,16 @@ const CameraScreen = ({ route, navigation }) => {
             <Text style={styles.previewButtonText}>Sauver</Text>
           </TouchableOpacity>
           
-          {isModal ? (
+          {fromStories ? (
+            // Si appelé depuis Stories, bouton pour créer une story
+            <TouchableOpacity 
+              style={[styles.previewButton, styles.storyButton]}
+              onPress={() => setShowStoryEditor(true)}
+            >
+              <Ionicons name="add-circle" size={24} color="white" />
+              <Text style={styles.previewButtonText}>Story</Text>
+            </TouchableOpacity>
+          ) : isModal ? (
             // Si appelé depuis la conversation, bouton pour envoyer directement à cette conversation
             <TouchableOpacity 
               style={[styles.previewButton, styles.sendButton]}
@@ -427,16 +585,27 @@ const CameraScreen = ({ route, navigation }) => {
               onPress={showFriendList}
             >
               <Ionicons name="people" size={24} color="white" />
-              <Text style={styles.previewButtonText}>Envoyer aux amis</Text>
+              <Text style={styles.previewButtonText}>Amis</Text>
             </TouchableOpacity>
           )}
         </View>
+        
+        {/* Ajouter un bouton Story si pas déjà depuis Stories */}
+        {!fromStories && !isModal && (
+          <TouchableOpacity 
+            style={styles.floatingStoryButton}
+            onPress={() => setShowStoryEditor(true)}
+          >
+            <Ionicons name="add" size={24} color="white" />
+            <Text style={styles.floatingStoryText}>Ma Story</Text>
+          </TouchableOpacity>
+        )}
       </SafeAreaView>
     );
   }
 
   // Écran de sélection d'options pour l'écran modal
-  if (isModal) {
+  if (isModal || fromStories) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#000" />
@@ -447,7 +616,9 @@ const CameraScreen = ({ route, navigation }) => {
           >
             <Ionicons name="close" size={28} color="white" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Capture d'image</Text>
+          <Text style={styles.headerTitle}>
+            {fromStories ? 'Créer une Story' : 'Capture d\'image'}
+          </Text>
           <View style={{ width: 28 }} />
         </View>
         
@@ -457,7 +628,9 @@ const CameraScreen = ({ route, navigation }) => {
             onPress={openCamera}
           >
             <Ionicons name="camera" size={40} color="white" />
-            <Text style={styles.optionText}>Prendre une photo</Text>
+            <Text style={styles.optionText}>
+              {fromStories ? 'Prendre une photo/vidéo' : 'Prendre une photo'}
+            </Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
@@ -488,6 +661,9 @@ const CameraScreen = ({ route, navigation }) => {
           <Text style={styles.retryButtonText}>Appuyez pour ouvrir la caméra</Text>
         </TouchableOpacity>
       </View>
+      
+      {/* Rendu de l'éditeur de story */}
+      {renderStoryEditor()}
     </SafeAreaView>
   );
 };
@@ -587,6 +763,26 @@ const styles = StyleSheet.create({
   sendButton: {
     backgroundColor: '#6C13B3',
   },
+  storyButton: {
+    backgroundColor: '#FF6B35',
+  },
+  floatingStoryButton: {
+    position: 'absolute',
+    top: 80,
+    right: 20,
+    backgroundColor: '#FF6B35',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  floatingStoryText: {
+    color: 'white',
+    marginLeft: 5,
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   // Styles pour la liste d'amis
   thumbnailPreview: {
     width: '100%',
@@ -679,6 +875,86 @@ const styles = StyleSheet.create({
   findFriendsButtonText: {
     color: 'white',
     fontWeight: '600',
+  },
+  // Styles pour l'éditeur de story
+  storyEditorContainer: {
+    flex: 1,
+    backgroundColor: 'black',
+  },
+  storyEditorHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 15,
+    paddingTop: Platform.OS === 'android' ? 40 : 15,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+  },
+  publishButton: {
+    backgroundColor: '#6C13B3',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 15,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  publishButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  storyPreviewContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  storyPreview: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  videoPreview: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+  },
+  videoText: {
+    color: 'white',
+    marginTop: 10,
+    fontSize: 16,
+  },
+  captionOverlay: {
+    position: 'absolute',
+    bottom: 100,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 10,
+    padding: 15,
+  },
+  captionInput: {
+    color: 'white',
+    fontSize: 16,
+    minHeight: 50,
+    maxHeight: 100,
+    textAlign: 'center',
+  },
+  storyEditorActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    padding: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+  },
+  editorActionButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 20,
+    minWidth: 80,
+  },
+  actionButtonText: {
+    color: 'white',
+    marginTop: 5,
+    fontSize: 12,
   },
 });
 

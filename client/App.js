@@ -21,6 +21,9 @@ import { Camera } from 'expo-camera';
 import SnapViewerScreen from './src/screens/SnapViewerScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import PasswordResetScreen from './src/screens/PasswordResetScreen';
+import ChatInfoScreen from './src/screens/ChatInfoScreen';
+// Ajouter l'import pour SelectFriendsScreen
+import SelectFriendsScreen from './src/screens/SelectFriendsScreen';
 
 // Ignorer certains avertissements non critiques
 LogBox.ignoreLogs([
@@ -31,6 +34,29 @@ LogBox.ignoreLogs([
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
+
+// Stack pour le profil avec ses sous-écrans
+const ProfileStack = () => {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ProfileMain" component={ProfileScreen} />
+      <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
+      <Stack.Screen name="PasswordReset" component={PasswordResetScreen} />
+    </Stack.Navigator>
+  );
+};
+
+// Stack pour le chat avec ses sous-écrans
+const ChatStack = () => {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="ChatMain" component={ChatScreen} />
+      <Stack.Screen name="ConversationScreen" component={ConversationScreen} />
+      <Stack.Screen name="ChatInfoScreen" component={ChatInfoScreen} />
+      <Stack.Screen name="SelectFriendsScreen" component={SelectFriendsScreen} />
+    </Stack.Navigator>
+  );
+};
 
 // Tabs de navigation principale
 const MainTabs = () => {
@@ -67,10 +93,10 @@ const MainTabs = () => {
         headerShown: false,
       })}
     >
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Profile" component={ProfileStack} />
       <Tab.Screen name="Camera" component={CameraScreen} />
       <Tab.Screen name="Stories" component={StoriesScreen} />
-      <Tab.Screen name="Chat" component={ChatScreen} />
+      <Tab.Screen name="Chat" component={ChatStack} />
       <Tab.Screen name="Map" component={MapScreen} />
     </Tab.Navigator>
   );
@@ -81,7 +107,6 @@ const MainStack = () => {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Main" component={MainTabs} />
-      <Stack.Screen name="ConversationScreen" component={ConversationScreen} />
       <Stack.Screen name="FindFriendsScreen" component={FindFriendsScreen} />
       <Stack.Screen name="FriendsListScreen" component={FriendsListScreen} />
       <Stack.Screen name="CameraScreen" component={CameraScreen} />
@@ -95,9 +120,6 @@ const MainStack = () => {
           cardStyle: { backgroundColor: 'black' }
         }}
       />
-      {/* Ajouter les écrans qui manquaient au niveau racine */}
-      <Stack.Screen name="SettingsScreen" component={SettingsScreen} />
-      <Stack.Screen name="PasswordReset" component={PasswordResetScreen} />
     </Stack.Navigator>
   );
 };

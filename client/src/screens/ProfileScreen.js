@@ -17,8 +17,10 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from '../context/AuthContext';
 import { uploadProfileImage } from '../services/storage';
-import { useNavigation, CommonActions } from '@react-navigation/native'; // Ajoutez CommonActions
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Ajoutez cette importation si elle manque
+import { useNavigation, CommonActions, useFocusEffect } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getFriends } from '../api/friendsApi';
+import { getUserStories } from '../api/storiesApi';
 
 const ProfileScreen = () => {
   const navigation = useNavigation();
@@ -34,8 +36,21 @@ const ProfileScreen = () => {
   const [loadAttempts, setLoadAttempts] = useState(0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
+  // Nouveaux états pour les compteurs
+  const [friendsCount, setFriendsCount] = useState(0);
+  const [storiesCount, setStoriesCount] = useState(0);
+  const [userStories, setUserStories] = useState([]);
+  const [loadingStats, setLoadingStats] = useState(true);
+  
   // Un chargement général court (2 secondes max) au lieu d'attendre indéfiniment
   const [initialLoading, setInitialLoading] = useState(true);
+
+  // Charger les statistiques à chaque fois que l'écran reçoit le focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadUserStats();
+    }, [user])
+  );
   
   // Utiliser les infos de l'utilisateur même sans profil complet
   useEffect(() => {
@@ -68,6 +83,33 @@ const ProfileScreen = () => {
     
     return () => clearTimeout(timeout);
   }, [userProfile, user, loadAttempts]);
+
+  // Fonction pour charger les statistiques utilisateur
+  const loadUserStats = async () => {
+    if (!user) return;
+    
+    setLoadingStats(true);
+    try {
+      // Charger le nombre d'amis
+      const friends = await getFriends();
+      setFriendsCount(friends?.length || 0);
+      
+      // Charger les stories de l'utilisateur
+      const stories = await getUserStories(user.id);
+      setUserStories(stories || []);
+      setStoriesCount(stories?.length || 0);
+      
+      console.log('Stats chargées:', { amis: friends?.length || 0, stories: stories?.length || 0 });
+    } catch (error) {
+      console.error('Erreur lors du chargement des stats:', error);
+      // En cas d'erreur, garder les valeurs par défaut
+      setFriendsCount(0);
+      setStoriesCount(0);
+      setUserStories([]);
+    } finally {
+      setLoadingStats(false);
+    }
+  };
   
   // Afficher un loader court au démarrage, mais ne pas attendre userProfile indéfiniment
   if (initialLoading) {
@@ -77,14 +119,33 @@ const ProfileScreen = () => {
       </View>
     );
   }
+
   const navigateToSettings = () => {
-    // Utiliser CommonActions pour une navigation robuste entre navigateurs imbriqués
-    navigation.dispatch(
-      CommonActions.navigate({
-        name: 'SettingsScreen',
-      })
-    );
+    // Navigation directe vers SettingsScreen
+    navigation.navigate('SettingsScreen');
   };
+
+  // Fonction pour voir ses propres stories
+  const viewMyStories = () => {
+    if (storiesCount > 0) {
+      // Naviguer vers l'écran stories avec focus sur les stories de l'utilisateur
+      navigation.navigate('Stories', { focusOnUser: user.id });
+    } else {
+      // Proposer de créer une story
+      Alert.alert(
+        'Aucune story',
+        'Vous n\'avez pas encore de story. Voulez-vous en créer une ?',
+        [
+          { text: 'Plus tard', style: 'cancel' },
+          { 
+            text: 'Créer', 
+            onPress: () => navigation.navigate('CameraScreen', { fromStories: true })
+          }
+        ]
+      );
+    }
+  };
+
   const pickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     
@@ -234,15 +295,6 @@ const ProfileScreen = () => {
     }
   };
   
-  // Ne pas attendre indéfiniment le profil
-  // if (!userProfile) {
-  //   return (
-  //     <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-  //       <ActivityIndicator size="large" color="#6C13B3" />
-  //     </View>
-  //   );
-  // }
-  
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
@@ -261,17 +313,12 @@ const ProfileScreen = () => {
           </View>
         ) : (
           <View style={styles.headerButtons}>
-         <TouchableOpacity 
-  style={styles.settingsButton}
-  onPress={() => {
-    // Navigation explicite pour les navigateurs imbriqués
-    navigation.navigate('ProfileMain', { 
-      screen: 'SettingsScreen' 
-    });
-  }}
->
-  <Ionicons name="settings-outline" size={24} color="#333" />
-</TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.settingsButton}
+              onPress={navigateToSettings}
+            >
+              <Ionicons name="settings-outline" size={24} color="#333" />
+            </TouchableOpacity>
             <TouchableOpacity 
               style={styles.editButton}
               onPress={() => setIsEditing(true)}
@@ -285,24 +332,36 @@ const ProfileScreen = () => {
       <View style={styles.profileHeader}>
         <TouchableOpacity 
           style={styles.profileImageContainer} 
-          onPress={isEditing ? pickImage : null}
+          onPress={isEditing ? pickImage : viewMyStories}
           disabled={loading}
           onLongPress={isEditing && profileImage ? removeProfileImage : null}
         >
-          {profileImage ? (
-            <Image 
-              source={{ uri: profileImage }} 
-              style={styles.profileImage} 
-            />
-          ) : (
-            <View style={[styles.profileImage, { backgroundColor: '#e1e1e1', justifyContent: 'center', alignItems: 'center' }]}>
-              <Ionicons name="person" size={50} color="#aaa" />
-            </View>
-          )}
+          {/* Bandeau Story autour de la photo de profil */}
+          <View style={[
+            styles.storyRing, 
+            storiesCount > 0 ? styles.hasStoryRing : styles.noStoryRing
+          ]}>
+            {profileImage ? (
+              <Image 
+                source={{ uri: profileImage }} 
+                style={styles.profileImage} 
+              />
+            ) : (
+              <View style={[styles.profileImage, { backgroundColor: '#e1e1e1', justifyContent: 'center', alignItems: 'center' }]}>
+                <Ionicons name="person" size={50} color="#aaa" />
+              </View>
+            )}
+          </View>
           
           {isEditing && (
             <View style={styles.editImageOverlay}>
               <Ionicons name="camera" size={24} color="white" />
+            </View>
+          )}
+          
+          {!isEditing && storiesCount > 0 && (
+            <View style={styles.storyIndicator}>
+              <Ionicons name="play-circle" size={20} color="#6C13B3" />
             </View>
           )}
           
@@ -328,14 +387,29 @@ const ProfileScreen = () => {
           )}
           
           <View style={styles.statsContainer}>
-            <View style={styles.stat}>
-              <Text style={styles.statNumber}>0</Text>
+            <TouchableOpacity 
+              style={styles.stat}
+              onPress={() => navigation.navigate('FriendsListScreen')}
+            >
+              {loadingStats ? (
+                <ActivityIndicator size="small" color="#6C13B3" />
+              ) : (
+                <Text style={styles.statNumber}>{friendsCount}</Text>
+              )}
               <Text style={styles.statLabel}>Amis</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={styles.statNumber}>0</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.stat}
+              onPress={viewMyStories}
+            >
+              {loadingStats ? (
+                <ActivityIndicator size="small" color="#6C13B3" />
+              ) : (
+                <Text style={styles.statNumber}>{storiesCount}</Text>
+              )}
               <Text style={styles.statLabel}>Stories</Text>
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -403,12 +477,13 @@ const ProfileScreen = () => {
       
       <View style={styles.actionsSection}>
         <TouchableOpacity 
-            style={styles.actionButton}
-             onPress={() => navigation.navigate('FriendsListScreen')}
-          >
-            <Ionicons name="people" size={24} color="#6C13B3" />
-            <Text style={styles.actionButtonText}>Mes amis</Text>
-          </TouchableOpacity>
+          style={styles.actionButton}
+          onPress={() => navigation.navigate('FriendsListScreen')}
+        >
+          <Ionicons name="people" size={24} color="#6C13B3" />
+          <Text style={styles.actionButtonText}>Mes amis ({friendsCount})</Text>
+        </TouchableOpacity>
+        
         <TouchableOpacity 
           style={styles.actionButton}
           onPress={() => navigation.navigate('FindFriendsScreen')}
@@ -419,10 +494,18 @@ const ProfileScreen = () => {
         
         <TouchableOpacity 
           style={styles.actionButton}
-          onPress={() => navigation.navigate('StoriesScreen')}
+          onPress={() => navigation.navigate('CameraScreen', { fromStories: true })}
+        >
+          <Ionicons name="camera-outline" size={24} color="#6C13B3" />
+          <Text style={styles.actionButtonText}>Créer une story</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.actionButton}
+          onPress={() => navigation.navigate('Stories')}
         >
           <Ionicons name="play-circle-outline" size={24} color="#6C13B3" />
-          <Text style={styles.actionButtonText}>Mes stories</Text>
+          <Text style={styles.actionButtonText}>Voir les stories</Text>
         </TouchableOpacity>
       </View>
       
@@ -533,17 +616,32 @@ const styles = StyleSheet.create({
   profileImageContainer: {
     position: 'relative',
   },
+  storyRing: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    borderWidth: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 3,
+  },
+  hasStoryRing: {
+    borderColor: '#6C13B3',
+  },
+  noStoryRing: {
+    borderColor: '#e0e0e0',
+  },
   profileImage: {
     width: 90,
     height: 90,
     borderRadius: 45,
     borderWidth: 3,
-    borderColor: '#6C13B3',
+    borderColor: '#fff',
   },
   editImageOverlay: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
+    bottom: 5,
+    right: 5,
     backgroundColor: 'rgba(108, 19, 179, 0.8)',
     width: 30,
     height: 30,
@@ -551,10 +649,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  storyIndicator: {
+    position: 'absolute',
+    bottom: 5,
+    right: 5,
+    backgroundColor: 'white',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,
+  },
   removeImageOverlay: {
     position: 'absolute',
-    top: 0,
-    right: 0,
+    top: 5,
+    right: 5,
     backgroundColor: 'rgba(231, 76, 60, 0.8)',
     width: 26,
     height: 26,
@@ -583,10 +697,12 @@ const styles = StyleSheet.create({
   },
   stat: {
     marginRight: 20,
+    alignItems: 'center',
   },
   statNumber: {
     fontSize: 18,
     fontWeight: 'bold',
+    color: '#6C13B3',
   },
   statLabel: {
     fontSize: 14,

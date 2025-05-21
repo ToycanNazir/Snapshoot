@@ -7,33 +7,50 @@ import supabase from './apiClient';
  * @param {string} userId - ID de l'utilisateur
  * @returns {Promise<string>} - URL publique de l'image uploadée
  */
-export const uploadProfileImage = async (uri, userId) => {
+export const uploadProfileImage = async (imageUri, userId) => {
   try {
-    // Convertir URI en blob
-    const response = await fetch(uri);
-    const blob = await response.blob();
+    // Créer un FormData pour l'upload
+    const formData = new FormData();
     
-    const fileExt = uri.split('.').pop();
-    const fileName = `${Date.now()}.${fileExt}`;
-    const filePath = `${userId}/${fileName}`;
+    // Ajouter l'image au FormData
+    formData.append('image', {
+      uri: imageUri,
+      type: 'image/jpeg',
+      name: `profile_${userId}.jpg`,
+    });
     
-    // Upload vers le bucket "avatars"
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, blob);
+    // Faire l'upload vers votre serveur
+    const response = await fetch('http://192.168.1.88:8080/api/upload/profile', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'multipart/form-data',
+        // Ajouter l'autorisation si nécessaire
+        // 'Authorization': `Bearer ${token}`,
+      },
+      body: formData,
+    });
     
-    if (uploadError) throw uploadError;
+    if (!response.ok) {
+      throw new Error(`Erreur d'upload: ${response.status}`);
+    }
     
-    // Récupérer l'URL publique
-    const { data } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(filePath);
+    const result = await response.json();
+    return result.imageUrl || result.url;
     
-    return data.publicUrl;
   } catch (error) {
-    console.error('Erreur lors de l\'upload de l\'image:', error);
-    throw error;
+    console.error('Erreur lors de l\'upload:', error);
+    throw new Error('Impossible d\'uploader l\'image');
   }
+};
+
+// Alternative temporaire si votre serveur n'est pas encore configuré
+export const uploadProfileImageMock = async (imageUri, userId) => {
+  // Simuler un délai d'upload
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  
+  // Retourner l'URI locale comme URL temporaire
+  // En production, vous devriez remplacer cela par un vrai service
+  return imageUri;
 };
 
 /**

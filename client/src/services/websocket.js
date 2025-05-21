@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SERVER_IP } from '../config/api'; // Import de la configuration
 
 let socket = null;
 let reconnectTimer = null;
@@ -19,8 +20,8 @@ export const initWebSocket = async () => {
       return false;
     }
     
-    // URL du serveur WebSocket (à adapter selon votre configuration)
-    const wsUrl = `ws://192.168.1.88:8080/api/ws?token=${token}`;
+    // URL du serveur WebSocket utilisant la configuration centralisée
+    const wsUrl = `ws://${SERVER_IP}/api/ws?token=${token}`;
     
     // Créer une nouvelle connexion WebSocket
     socket = new WebSocket(wsUrl);

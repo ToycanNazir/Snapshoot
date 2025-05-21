@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,25 +9,96 @@ import {
   Dimensions,
   StatusBar,
   Animated,
-  PanResponder
+  PanResponder,
+  Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Video } from 'expo-av';
+import { useFocusEffect } from '@react-navigation/native';
+import { useAuth } from '../context/AuthContext';
+import { getAllStories, getUserStories, markStoryAsViewed, likeStory, deleteStory } from '../api/storiesApi';
 
 const { width, height } = Dimensions.get('window');
 
 const StoriesScreen = ({ navigation }) => {
+  const { user } = useAuth();
   const [stories, setStories] = useState([]);
+  const [userStories, setUserStories] = useState([]);
   const [activeStoryIndex, setActiveStoryIndex] = useState(null);
   const [progress, setProgress] = useState(new Animated.Value(0));
+  const [loading, setLoading] = useState(true);
+  
   const progressAnimation = progress.interpolate({
     inputRange: [0, 1],
     outputRange: ['0%', '100%']
   });
-  
-  // Simulation des données pour les stories
-  useEffect(() => {
-    // Ici, vous appelleriez normalement une fonction pour récupérer les stories depuis Firebase
+
+  // Charger les stories à chaque fois que l'écran reçoit le focus
+  useFocusEffect(
+    useCallback(() => {
+      loadStories();
+    }, [user])
+  );
+
+  const loadStories = async () => {
+    if (!user) return;
+    
+    setLoading(true);
+    try {
+      // Charger toutes les stories
+      const allStories = await getAllStories();
+      console.log('Stories chargées:', allStories.length);
+      
+      // Charger les stories de l'utilisateur actuel
+      const currentUserStories = await getUserStories(user.id);
+      console.log('Stories utilisateur:', currentUserStories.length);
+      
+      // Ajouter les stories de l'utilisateur en première position s'il en a
+      let finalStories = [...allStories];
+      if (currentUserStories.length > 0) {
+        // Vérifier si l'utilisateur est déjà dans la liste
+        const userIndex = finalStories.findIndex(story => story.user.id === user.id);
+        if (userIndex !== -1) {
+          // Mettre à jour les stories existantes
+          finalStories[userIndex] = {
+            id: user.id,
+            user: {
+              id: user.id,
+              name: user.username || user.email,
+              avatar: user.avatar_url || 'https://randomuser.me/api/portraits/lego/1.jpg',
+            },
+            items: currentUserStories
+          };
+          // Déplacer en première position
+          const userStory = finalStories.splice(userIndex, 1)[0];
+          finalStories.unshift(userStory);
+        } else {
+          // Ajouter en première position
+          finalStories.unshift({
+            id: user.id,
+            user: {
+              id: user.id,
+              name: user.username || user.email,
+              avatar: user.avatar_url || 'https://randomuser.me/api/portraits/lego/1.jpg',
+            },
+            items: currentUserStories
+          });
+        }
+      }
+      
+      setStories(finalStories);
+      setUserStories(currentUserStories);
+    } catch (error) {
+      console.error('Erreur lors du chargement des stories:', error);
+      // Fallback avec des données simulées
+      loadDummyStories();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fallback avec des données simulées
+  const loadDummyStories = () => {
     const dummyStories = [
       {
         id: '1',
@@ -44,13 +115,6 @@ const StoriesScreen = ({ navigation }) => {
             timestamp: new Date(Date.now() - 1000 * 60 * 30),
             caption: 'Belle soirée sur Paris 🗼',
           },
-          {
-            id: 'story2',
-            type: 'video',
-            url: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-            timestamp: new Date(Date.now() - 1000 * 60 * 20),
-            caption: 'Concert incroyable !',
-          }
         ],
       },
       {
@@ -70,11 +134,9 @@ const StoriesScreen = ({ navigation }) => {
           }
         ],
       },
-      // Ajoutez plus de stories simulées
     ];
-    
     setStories(dummyStories);
-  }, []);
+  };
   
   // Gestion du temps d'affichage d'une story
   const storyTimeout = () => {
@@ -90,9 +152,19 @@ const StoriesScreen = ({ navigation }) => {
     });
   };
   
-  const handleStoryPress = (index) => {
+  const handleStoryPress = async (index) => {
     progress.setValue(0);
     setActiveStoryIndex(index);
+    
+    // Marquer la story comme vue si ce n'est pas celle de l'utilisateur actuel
+    const story = stories[index];
+    if (story && story.user.id !== user.id) {
+      const currentItem = story.items[story.currentItem || 0];
+      if (currentItem) {
+        await markStoryAsViewed(currentItem.id, user.id);
+      }
+    }
+    
     storyTimeout();
   };
   
@@ -149,6 +221,50 @@ const StoriesScreen = ({ navigation }) => {
       }
     }
   };
+
+  // Fonction pour liker une story
+  const handleLikeStory = async () => {
+    if (activeStoryIndex !== null) {
+      const story = stories[activeStoryIndex];
+      const currentItem = story.items[story.currentItem || 0];
+      if (currentItem && story.user.id !== user.id) {
+        await likeStory(currentItem.id, user.id);
+        // Recharger les stories pour refléter le changement
+        loadStories();
+      }
+    }
+  };
+
+  // Fonction pour supprimer une story (seulement pour ses propres stories)
+  const handleDeleteStory = async () => {
+    if (activeStoryIndex !== null) {
+      const story = stories[activeStoryIndex];
+      const currentItem = story.items[story.currentItem || 0];
+      
+      if (currentItem && story.user.id === user.id) {
+        Alert.alert(
+          "Supprimer la story",
+          "Êtes-vous sûr de vouloir supprimer cette story ?",
+          [
+            { text: "Annuler", style: "cancel" },
+            { 
+              text: "Supprimer", 
+              style: "destructive",
+              onPress: async () => {
+                try {
+                  await deleteStory(currentItem.id, user.id);
+                  setActiveStoryIndex(null);
+                  loadStories(); // Recharger les stories
+                } catch (error) {
+                  Alert.alert("Erreur", "Impossible de supprimer la story");
+                }
+              }
+            }
+          ]
+        );
+      }
+    }
+  };
   
   // Gestion des gestes pour naviguer entre les stories
   const panResponder = React.useRef(
@@ -191,7 +307,7 @@ const StoriesScreen = ({ navigation }) => {
   // Formater le temps écoulé
   const getElapsedTime = (timestamp) => {
     const now = new Date();
-    const elapsed = now - timestamp;
+    const elapsed = now - new Date(timestamp);
     
     if (elapsed < 60000) {
       return 'À l\'instant';
@@ -206,7 +322,8 @@ const StoriesScreen = ({ navigation }) => {
   
   // Rendu d'un aperçu de story dans la liste
   const renderStoryPreview = ({ item, index }) => {
-    const hasUnseenStories = true; // À remplacer par la logique réelle
+    const isUserStory = item.user.id === user.id;
+    const hasUnseenStories = !isUserStory; // Pour simplifier, on considère que les stories des autres sont non vues
     
     return (
       <TouchableOpacity 
@@ -215,9 +332,17 @@ const StoriesScreen = ({ navigation }) => {
       >
         <View style={[styles.avatarContainer, hasUnseenStories ? styles.unseenStoryRing : null]}>
           <Image source={{ uri: item.user.avatar }} style={styles.avatar} />
+          {isUserStory && (
+            <TouchableOpacity 
+              style={styles.addStoryButton}
+              onPress={() => navigation.navigate('CameraScreen', { fromStories: true })}
+            >
+              <Ionicons name="add" size={16} color="white" />
+            </TouchableOpacity>
+          )}
         </View>
         <Text style={styles.username} numberOfLines={1}>
-          {item.user.name}
+          {isUserStory ? 'Ma Story' : item.user.name}
         </Text>
       </TouchableOpacity>
     );
@@ -230,6 +355,7 @@ const StoriesScreen = ({ navigation }) => {
     const story = stories[activeStoryIndex];
     const itemIndex = story.currentItem || 0;
     const storyItem = story.items[itemIndex];
+    const isUserStory = story.user.id === user.id;
     
     return (
       <View style={styles.storyContainer} {...panResponder.panHandlers}>
@@ -261,9 +387,19 @@ const StoriesScreen = ({ navigation }) => {
             </View>
           </View>
           
-          <TouchableOpacity onPress={() => setActiveStoryIndex(null)}>
-            <Ionicons name="close" size={24} color="white" />
-          </TouchableOpacity>
+          <View style={styles.storyHeaderActions}>
+            {isUserStory && (
+              <TouchableOpacity 
+                style={styles.storyActionButton}
+                onPress={handleDeleteStory}
+              >
+                <Ionicons name="trash-outline" size={20} color="white" />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={() => setActiveStoryIndex(null)}>
+              <Ionicons name="close" size={24} color="white" />
+            </TouchableOpacity>
+          </View>
         </View>
         
         {/* Content */}
@@ -287,6 +423,40 @@ const StoriesScreen = ({ navigation }) => {
             <Text style={styles.caption}>{storyItem.caption}</Text>
           </View>
         )}
+
+        {/* Actions en bas (like, répondre, etc.) */}
+        {!isUserStory && (
+          <View style={styles.storyActions}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={handleLikeStory}
+            >
+              <Ionicons 
+                name={storyItem.likes && storyItem.likes.includes(user.id) ? "heart" : "heart-outline"} 
+                size={24} 
+                color={storyItem.likes && storyItem.likes.includes(user.id) ? "#FF6B6B" : "white"} 
+              />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => {
+                // Naviguer vers la conversation avec cet utilisateur
+                setActiveStoryIndex(null);
+                // Ici vous pourriez naviguer vers ConversationScreen avec l'ID de l'utilisateur
+              }}
+            >
+              <Ionicons name="paper-plane-outline" size={24} color="white" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Affichage des vues pour les stories de l'utilisateur */}
+        {isUserStory && storyItem.views && storyItem.views.length > 0 && (
+          <View style={styles.viewsContainer}>
+            <Ionicons name="eye" size={16} color="white" />
+            <Text style={styles.viewsText}>{storyItem.views.length} vue{storyItem.views.length > 1 ? 's' : ''}</Text>
+          </View>
+        )}
         
         {/* Navigation buttons - invisible but functional */}
         <TouchableOpacity 
@@ -300,6 +470,14 @@ const StoriesScreen = ({ navigation }) => {
       </View>
     );
   };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Chargement des stories...</Text>
+      </View>
+    );
+  }
   
   return (
     <View style={styles.container}>
@@ -311,12 +489,13 @@ const StoriesScreen = ({ navigation }) => {
             <Text style={styles.headerTitle}>Stories</Text>
             <TouchableOpacity 
               style={styles.cameraButton}
-              onPress={() => navigation.navigate('Camera')}
+              onPress={() => navigation.navigate('CameraScreen', { fromStories: true })}
             >
               <Ionicons name="camera-outline" size={24} color="#6C13B3" />
             </TouchableOpacity>
           </View>
           
+          {/* Ma Story + Stories des amis */}
           <FlatList
             data={stories}
             renderItem={renderStoryPreview}
@@ -324,15 +503,42 @@ const StoriesScreen = ({ navigation }) => {
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.storiesList}
+            ListEmptyComponent={() => (
+              <View style={styles.emptyStoriesContainer}>
+                <TouchableOpacity 
+                  style={styles.createFirstStoryButton}
+                  onPress={() => navigation.navigate('CameraScreen', { fromStories: true })}
+                >
+                  <Ionicons name="add" size={30} color="#6C13B3" />
+                  <Text style={styles.createFirstStoryText}>Créer votre première story</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           />
           
           <View style={styles.divider} />
           
-          <Text style={styles.feedTitle}>Découvrir</Text>
+          {/* Section Découvrir (stories récentes) */}
+          <Text style={styles.feedTitle}>Récentes</Text>
           <FlatList
-            data={stories}
+            data={stories.filter(story => story.user.id !== user.id)} // Exclure ses propres stories
             keyExtractor={item => `feed-${item.id}`}
             showsVerticalScrollIndicator={false}
+            ListEmptyComponent={() => (
+              <View style={styles.emptyFeedContainer}>
+                <Ionicons name="camera-outline" size={50} color="#ccc" />
+                <Text style={styles.emptyFeedText}>
+                  Aucune story à afficher.{'\n'}
+                  Ajoutez des amis pour voir leurs stories !
+                </Text>
+                <TouchableOpacity 
+                  style={styles.findFriendsButton}
+                  onPress={() => navigation.navigate('FindFriendsScreen')}
+                >
+                  <Text style={styles.findFriendsButtonText}>Trouver des amis</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             renderItem={({ item, index }) => {
               // Prendre la première story comme aperçu
               const previewStory = item.items[0];
@@ -340,7 +546,7 @@ const StoriesScreen = ({ navigation }) => {
               return (
                 <TouchableOpacity 
                   style={styles.feedItem}
-                  onPress={() => handleStoryPress(index)}
+                  onPress={() => handleStoryPress(stories.findIndex(s => s.id === item.id))}
                 >
                   <Image 
                     source={{ uri: previewStory.url }} 
@@ -357,6 +563,20 @@ const StoriesScreen = ({ navigation }) => {
                         {previewStory.caption}
                       </Text>
                     )}
+                    <View style={styles.feedItemStats}>
+                      <View style={styles.statItem}>
+                        <Ionicons name="eye" size={14} color="white" />
+                        <Text style={styles.statText}>
+                          {previewStory.views ? previewStory.views.length : 0}
+                        </Text>
+                      </View>
+                      <View style={styles.statItem}>
+                        <Ionicons name="heart" size={14} color="white" />
+                        <Text style={styles.statText}>
+                          {previewStory.likes ? previewStory.likes.length : 0}
+                        </Text>
+                      </View>
+                    </View>
                   </View>
                 </TouchableOpacity>
               );
@@ -373,12 +593,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 15,
+    paddingTop: 55,
     paddingBottom: 10,
   },
   headerTitle: {
@@ -397,6 +627,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingTop: 10,
     paddingBottom: 15,
+    minHeight: 120,
   },
   storyPreviewContainer: {
     alignItems: 'center',
@@ -412,6 +643,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 5,
+    position: 'relative',
   },
   unseenStoryRing: {
     borderColor: '#6C13B3',
@@ -421,11 +653,43 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 30,
   },
-// Suite des styles pour StoriesScreen
+  addStoryButton: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#6C13B3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
+  },
   username: {
     fontSize: 12,
     textAlign: 'center',
     color: '#333',
+  },
+  emptyStoriesContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    width: width - 20,
+  },
+  createFirstStoryButton: {
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    padding: 20,
+    borderRadius: 15,
+    width: '100%',
+  },
+  createFirstStoryText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#6C13B3',
+    fontWeight: '600',
   },
   divider: {
     height: 1,
@@ -438,6 +702,31 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginHorizontal: 20,
     marginBottom: 10,
+  },
+  emptyFeedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 40,
+  },
+  emptyFeedText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 15,
+    marginBottom: 20,
+    lineHeight: 22,
+  },
+  findFriendsButton: {
+    backgroundColor: '#6C13B3',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
+  findFriendsButtonText: {
+    color: 'white',
+    fontWeight: '600',
   },
   feedItem: {
     marginHorizontal: 15,
@@ -477,6 +766,20 @@ const styles = StyleSheet.create({
   feedItemCaption: {
     color: 'white',
     fontSize: 13,
+    marginBottom: 8,
+  },
+  feedItemStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  statItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  statText: {
+    color: 'white',
+    fontSize: 12,
+    marginLeft: 4,
   },
   storyContainer: {
     flex: 1,
@@ -536,6 +839,13 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.8)',
     fontSize: 12,
   },
+  storyHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  storyActionButton: {
+    marginRight: 15,
+  },
   storyMedia: {
     flex: 1,
     width: '100%',
@@ -543,7 +853,7 @@ const styles = StyleSheet.create({
   },
   captionContainer: {
     position: 'absolute',
-    bottom: 50,
+    bottom: 100,
     left: 0,
     right: 0,
     padding: 15,
@@ -552,6 +862,33 @@ const styles = StyleSheet.create({
   caption: {
     color: 'white',
     fontSize: 16,
+    textAlign: 'center',
+  },
+  storyActions: {
+    position: 'absolute',
+    bottom: 60,
+    right: 15,
+    alignItems: 'center',
+  },
+  actionButton: {
+    marginBottom: 15,
+    padding: 8,
+  },
+  viewsContainer: {
+    position: 'absolute',
+    bottom: 30,
+    left: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 15,
+  },
+  viewsText: {
+    color: 'white',
+    fontSize: 12,
+    marginLeft: 5,
   },
   prevButton: {
     position: 'absolute',

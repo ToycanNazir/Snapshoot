@@ -8,7 +8,7 @@ import { Alert } from 'react-native';
 const AuthContext = createContext();
 
 // URL de base de l'API
-const API_BASE_URL = 'http://192.168.1.88:8080';
+import { API_BASE_URL } from '../config/api';
 
 // Client axios
 const apiClient = axios.create({

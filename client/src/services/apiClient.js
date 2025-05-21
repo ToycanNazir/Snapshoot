@@ -6,7 +6,7 @@ import { uuidv4 } from '../utils/uuid';
 // Modifiez cette URL pour correspondre à votre API Gateway
 // const API_BASE_URL = 'http://10.0.2.2:3000'; // Pour l'émulateur Android
 // const API_BASE_URL = 'http://localhost:3000'; // Pour iOS simulator
-const API_BASE_URL = 'http://192.168.1.88:8080'; // Port 8080 pour l'API Gateway
+import { API_BASE_URL } from '../config/api';
 
 class ApiClient {
   constructor() {

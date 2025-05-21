@@ -1,7 +1,8 @@
 // src/services/userService.js
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const API_BASE_URL = 'http://192.168.1.88:8080';
+import { API_BASE_URL } from '../config/api';
+
 
 /**
  * Récupère tous les utilisateurs (pour trouver des amis)

@@ -22,6 +22,7 @@ import chatService, { getChatMessages, sendMessage, uploadMedia, ensureCurrentUs
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 // Clés AsyncStorage
 const MESSAGES_KEY_PREFIX = 'local_messages_';
 const USER_ID_KEY = 'local_user_id';
@@ -39,8 +40,7 @@ const ConversationScreen = ({ route, navigation }) => {
   const [lastMessageId, setLastMessageId] = useState(null);
   const conversationIdRef = useRef(chatId);
   const [contactStatus, setContactStatus] = useState('En ligne');
-  const SNAP_MESSAGE_PREFIX = 'snap_';
-  const OPENED_SNAPS_KEY = 'opened_snaps_';
+
   // Débogage de l'ID utilisateur
   useEffect(() => {
     const checkUserIds = async () => {
@@ -62,25 +62,16 @@ const ConversationScreen = ({ route, navigation }) => {
     checkUserIds();
   }, [user]);
 
+  // Configurer la navigation
   useEffect(() => {
-    // Vérifier si chatId est défini et valide
     if (!chatId) {
       console.error("ID de conversation manquant");
-      
-      // Essayer de récupérer l'ID depuis le paramètre conversationId (pour les retours de CameraScreen)
-      if (route.params?.conversationId) {
-        console.log("Utilisation de conversationId en fallback:", route.params.conversationId);
-        conversationIdRef.current = route.params.conversationId;
-      } else {
-        console.error("Aucun ID de conversation trouvé, retour à l'écran précédent");
-        navigation.goBack();
-        return;
-      }
-    } else {
-      // Si chatId est valide, l'utiliser
-      console.log("Utilisation de chatId:", chatId);
-      conversationIdRef.current = chatId;
+      navigation.goBack();
+      return;
     }
+    
+    // Stocker l'ID de conversation pour référence
+    conversationIdRef.current = chatId;
     
     // Simuler un statut du contact qui change
     const statusTimer = setTimeout(() => {
@@ -90,8 +81,8 @@ const ConversationScreen = ({ route, navigation }) => {
     }, 3000);
     
     return () => clearTimeout(statusTimer);
-  }, [navigation, chatId, route.params?.conversationId, chatName, chatAvatar]);
-  
+  }, [navigation, chatId, chatName, chatAvatar]);
+
   // Charger les messages
   const loadMessages = async () => {
     try {
@@ -162,14 +153,7 @@ const ConversationScreen = ({ route, navigation }) => {
 
   // Configuration du polling pour les messages
   useEffect(() => {
-    const currentChatId = conversationIdRef.current;
-    
-    if (!currentChatId) {
-      console.error("ID de conversation manquant pour le polling");
-      return;
-    }
-    
-    console.log('Initialisation du polling pour:', currentChatId);
+    console.log('Initialisation du polling pour:', chatId);
     
     // Charger les messages immédiatement
     loadMessages();
@@ -186,130 +170,34 @@ const ConversationScreen = ({ route, navigation }) => {
         clearInterval(messagePollingInterval.current);
       }
     };
-  }, []);
-  // Option pour prendre une photo avec la caméra
-// Assurez-vous que cette importation est présente en haut de votre fichier
-const openSnap = async (messageId, mediaUrl) => {
-  try {
-    // Marquer le snap comme ouvert dans l'état local
-    setMessages(prevMessages => 
-      prevMessages.map(msg => 
-        msg.id === messageId 
-          ? { ...msg, is_opened: true } 
-          : msg
-      )
-    );
-    
-    // Enregistrer dans AsyncStorage que ce snap a été ouvert
-    const openedSnapsKey = `${OPENED_SNAPS_KEY}${user.id}`;
-    const openedSnapsJSON = await AsyncStorage.getItem(openedSnapsKey);
-    const openedSnaps = openedSnapsJSON ? JSON.parse(openedSnapsJSON) : [];
-    
-    if (!openedSnaps.includes(messageId)) {
-      openedSnaps.push(messageId);
-      await AsyncStorage.setItem(openedSnapsKey, JSON.stringify(openedSnaps));
-    }
-    
-    // Naviguer vers l'écran de visualisation du snap
-    navigation.navigate('SnapViewerScreen', {
-      mediaUrl,
-      messageId,
-      otherUserId,
-      chatName
-    });
-  } catch (error) {
-    console.error('Erreur lors de l\'ouverture du snap:', error);
-    Alert.alert('Erreur', 'Impossible d\'ouvrir ce message');
-  }
-};
-// Remplacez votre fonction takePhoto existante par celle-ci
-const takePhoto = async () => {
-  try {
-    // Naviguer vers l'écran de caméra personnalisé
-    // Passer un flag pour indiquer que l'appel vient de la conversation
-    navigation.navigate('CameraScreen', {
-      fromConversation: true,
-      conversationId: chatId // Passer l'ID de la conversation actuelle
-    });
-  } catch (error) {
-    console.error('Erreur lors de la navigation vers la caméra:', error);
-    Alert.alert('Erreur', 'Impossible d\'accéder à la caméra');
-  }
-};
-const simulateReceivedSnap = async () => {
-  // Utiliser une image test
-  const testImageUrl = 'https://source.unsplash.com/random/800x600/?nature';
-  
-  try {
-    const currentChatId = conversationIdRef.current;
-    
-    if (!currentChatId) {
-      Alert.alert('Erreur', 'ID de conversation manquant');
-      return;
-    }
-    
-    // Créer un message Snap simulé
-    const simulatedSnap = {
-      id: 'simulated_' + Date.now(),
-      conversation_id: currentChatId,
-      user_id: otherUserId || 'test_user', // Utiliser otherUserId ou une valeur par défaut
-      content: `${SNAP_MESSAGE_PREFIX}${Date.now()}`,
-      media_url: testImageUrl,
-      media_type: 'image',
-      created_at: new Date().toISOString(),
-      is_temp: false
-    };
-    
-    // Ajouter le message simulé à l'état local
-    setMessages(prevMessages => [...prevMessages, simulatedSnap]);
-    
-    // Sauvegarder dans AsyncStorage
-    try {
-      const messagesKey = `${MESSAGES_KEY_PREFIX}${currentChatId}`;
-      const messagesStr = await AsyncStorage.getItem(messagesKey);
-      const existingMessages = messagesStr ? JSON.parse(messagesStr) : [];
-      
-      if (!existingMessages.some(m => m.id === simulatedSnap.id)) {
-        const updatedMessages = [...existingMessages, simulatedSnap];
-        await AsyncStorage.setItem(messagesKey, JSON.stringify(updatedMessages));
-      }
-    } catch (error) {
-      console.error('Erreur lors de la sauvegarde du Snap simulé:', error);
-    }
-    
-    // Scroll vers le bas pour montrer le nouveau message
-    if (flatListRef.current) {
-      setTimeout(() => {
-        flatListRef.current.scrollToEnd({ animated: true });
-      }, 100);
-    }
-    
-    Alert.alert('Test', 'Vous avez reçu un Snap de test! Cliquez dessus pour le voir.');
-  } catch (error) {
-    console.error('Erreur lors de la simulation du Snap:', error);
-    Alert.alert('Erreur', 'Impossible de simuler la réception d\'un Snap');
-  }
-};
-// Ajoutez cette fonction useEffect après les autres useEffect dans votre composant
-// pour traiter l'image capturée quand l'utilisateur revient de l'écran caméra
+  }, [chatId]);
 
-useEffect(() => {
-  // Vérifie si route.params contient une image capturée et si on est dans la bonne conversation
-  if (route.params?.capturedImage && route.params?.conversationId === chatId) {
-    const photoUri = route.params.capturedImage;
-    console.log('Photo reçue dans ConversationScreen:', photoUri);
-    
-    // Définir le média avec l'URI de la photo prise
-    setMedia({
-      uri: photoUri,
-      type: 'image'
-    });
-    
-    // Effacer le paramètre pour éviter de réutiliser la même image
-    // si l'utilisateur navigue ailleurs puis revient
-    navigation.setParams({ capturedImage: undefined });
-  }
-}, [route.params?.capturedImage, route.params?.conversationId]);
+  // Option pour prendre une photo avec la caméra
+  const takePhoto = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert('Permission refusée', 'Nous avons besoin de votre permission pour accéder à la caméra.');
+        return;
+      }
+      
+      // Navigation vers l'écran de caméra (à définir)
+      navigation.navigate('CameraScreen', {
+        onPhotoTaken: (photoUri) => {
+          // Cette fonction sera appelée lorsqu'une photo est prise
+          setMedia({
+            uri: photoUri,
+            type: 'image'
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Erreur lors de l\'accès à la caméra:', error);
+      Alert.alert('Erreur', 'Impossible d\'accéder à la caméra');
+    }
+  };
+
   // Sélectionner une image à envoyer
   const pickImage = async () => {
     try {
@@ -466,56 +354,6 @@ useEffect(() => {
     // Vérifier si l'utilisateur actuel est l'expéditeur
     const isCurrentUser = user && String(item.user_id) === String(user.id);
     
-    // Vérifier si c'est un message snap
-    const isSnapMessage = item.media_url && item.content && item.content.startsWith(SNAP_MESSAGE_PREFIX);
-    
-    // Si c'est un snap et qu'il n'a pas été ouvert
-    if (isSnapMessage && !item.is_opened && !isCurrentUser) {
-      return (
-        <View style={[
-          styles.messageContainer,
-          isCurrentUser ? styles.currentUserMessageContainer : styles.otherUserMessageContainer
-        ]}>
-          {!isCurrentUser && (
-            <Image 
-              source={{ uri: chatAvatar || 'https://randomuser.me/api/portraits/lego/1.jpg' }} 
-              style={styles.messageAvatar} 
-            />
-          )}
-          
-          <TouchableOpacity 
-            style={[
-              styles.messageBubble,
-              isCurrentUser ? styles.currentUserBubble : styles.otherUserBubble,
-              styles.snapBubble
-            ]}
-            onPress={() => openSnap(item.id, item.media_url)}
-          >
-            <View style={styles.snapIconContainer}>
-              <Ionicons name="camera" size={24} color={isCurrentUser ? 'white' : '#6C13B3'} />
-            </View>
-            <Text style={[
-              styles.snapText,
-              isCurrentUser ? styles.currentUserText : styles.otherUserText
-            ]}>
-              Appuyez pour voir la photo
-            </Text>
-            <Text style={[
-              styles.messageTime,
-              isCurrentUser ? styles.currentUserTime : styles.otherUserTime
-            ]}>
-              {item.is_temp ? "Envoi..." : formatMessageTime(item.created_at)}
-            </Text>
-          </TouchableOpacity>
-          
-          {isCurrentUser && (
-            <View style={styles.emptyAvatar} />
-          )}
-        </View>
-      );
-    }
-    
-    // Pour les snaps déjà ouverts ou autres messages normaux
     return (
       <View style={[
         styles.messageContainer,
@@ -532,32 +370,19 @@ useEffect(() => {
           styles.messageBubble,
           isCurrentUser ? styles.currentUserBubble : styles.otherUserBubble,
           item.media_url ? styles.mediaBubble : null,
-          item.is_temp ? styles.tempMessage : null,
-          isSnapMessage && item.is_opened ? styles.openedSnapBubble : null
+          item.is_temp ? styles.tempMessage : null
         ]}>
           {item.media_url && (
-            isSnapMessage && item.is_opened ? (
-              <View style={styles.openedSnapContainer}>
-                <Ionicons name="checkmark-circle" size={28} color={isCurrentUser ? 'white' : '#6C13B3'} />
-                <Text style={[
-                  styles.openedSnapText,
-                  isCurrentUser ? styles.currentUserText : styles.otherUserText
-                ]}>
-                  Snap ouvert
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.mediaContainer}>
-                <Image 
-                  source={{ uri: item.media_url }} 
-                  style={styles.mediaImage}
-                  resizeMode="cover"
-                />
-              </View>
-            )
+            <View style={styles.mediaContainer}>
+              <Image 
+                source={{ uri: item.media_url }} 
+                style={styles.mediaImage}
+                resizeMode="cover"
+              />
+            </View>
           )}
           
-          {item.content && !isSnapMessage && (
+          {item.content && (
             <Text style={[
               styles.messageText,
               isCurrentUser ? styles.currentUserText : styles.otherUserText
@@ -580,105 +405,7 @@ useEffect(() => {
       </View>
     );
   };
-  const handleSendSnap = async () => {
-    if (!media) {
-      Alert.alert('Erreur', 'Veuillez sélectionner une image à envoyer');
-      return;
-    }
-  
-    setSending(true);
-  
-    try {
-      const currentChatId = conversationIdRef.current;
-      // Forcer la synchronisation de l'ID utilisateur
-      if (user?.id) {
-        await AsyncStorage.setItem(USER_ID_KEY, user.id);
-      }
-      
-      let mediaUrl = null;
-      let mediaType = null;
-  
-      // Upload du média
-      try {
-        mediaUrl = await uploadMedia(media.uri, media.type);
-        mediaType = media.type;
-      } catch (mediaError) {
-        console.error('Erreur lors de l\'upload du média:', mediaError);
-        Alert.alert('Erreur', 'Impossible d\'uploader l\'image');
-        setSending(false);
-        return;
-      }
-  
-      // Créer un contenu spécial pour les snaps
-      const snapContent = `${SNAP_MESSAGE_PREFIX}${Date.now()}`;
-  
-      // Ajouter un message temporaire pour une meilleure UX
-      const tempMessage = {
-        id: 'temp_' + Date.now(),
-        conversation_id: currentChatId,
-        user_id: user?.id,
-        content: snapContent,
-        media_url: mediaUrl,
-        media_type: mediaType,
-        created_at: new Date().toISOString(),
-        is_temp: true
-      };
-      
-      // Ajouter le message temporaire à l'état local
-      setMessages(prevMessages => [...prevMessages, tempMessage]);
-      
-      // Réinitialiser les champs
-      setInputText('');
-      setMedia(null);
-      
-      // Scroll en bas automatiquement
-      if (flatListRef.current) {
-        setTimeout(() => {
-          flatListRef.current.scrollToEnd({ animated: true });
-        }, 100);
-      }
-  
-      // Envoyer le message via le service
-      console.log(`Envoi d'un snap pour la conversation: ${currentChatId}`);
-      const sentMessage = await sendMessage(
-        currentChatId,
-        snapContent,
-        mediaUrl,
-        mediaType
-      );
-      
-      if (sentMessage && sentMessage.id) {
-        console.log('Snap envoyé avec succès, ID:', sentMessage.id);
-        
-        // Sauvegarder directement dans AsyncStorage pour garantir la persistance
-        try {
-          const messagesKey = `${MESSAGES_KEY_PREFIX}${currentChatId}`;
-          const messagesStr = await AsyncStorage.getItem(messagesKey);
-          const existingMessages = messagesStr ? JSON.parse(messagesStr) : [];
-          
-          // Vérifier si le message n'existe pas déjà
-          if (!existingMessages.some(m => m.id === sentMessage.id)) {
-            const updatedMessages = [...existingMessages, sentMessage];
-            await AsyncStorage.setItem(messagesKey, JSON.stringify(updatedMessages));
-            console.log('Snap sauvegardé dans AsyncStorage avec succès');
-          }
-        } catch (saveError) {
-          console.error('Erreur lors de la sauvegarde du snap:', saveError);
-        }
-      }
-      
-      // Recharger les messages pour avoir la version finale
-      setTimeout(() => {
-        loadMessages();
-      }, 500);
-      
-    } catch (error) {
-      console.error('Erreur lors de l\'envoi du snap:', error);
-      Alert.alert('Erreur', 'Impossible d\'envoyer la photo');
-    } finally {
-      setSending(false);
-    }
-  };
+
   // Header personnalisé
   const renderHeader = () => (
     <View style={styles.header}>
@@ -710,24 +437,16 @@ useEffect(() => {
         >
           <Ionicons name="camera" size={24} color="#6C13B3" />
         </TouchableOpacity>
-        
-        {/* Bouton de test pour simuler un Snap reçu */}
         <TouchableOpacity 
           style={styles.headerButton}
-          onPress={simulateReceivedSnap}
-        >
-          <Ionicons name="gift" size={24} color="#FFFC00" />
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.headerButton}
-          onPress={() => navigation.navigate('ChatInfoScreen', { chatId: conversationIdRef.current })}
+          onPress={() => navigation.navigate('ChatInfoScreen', { chatId })}
         >
           <Ionicons name="ellipsis-vertical" size={24} color="#6C13B3" />
         </TouchableOpacity>
       </View>
     </View>
   );
+
   // Afficher un indicateur de chargement
   if (loading) {
     return (
@@ -767,36 +486,22 @@ useEffect(() => {
             </View>
           }
         />
+        
         {media && (
-  <View style={styles.mediaPreviewContainer}>
-    <Image 
-      source={{ uri: media.uri }} 
-      style={styles.mediaPreview}
-    />
-    <TouchableOpacity 
-      style={styles.removeMediaButton}
-      onPress={() => setMedia(null)}
-    >
-      <Ionicons name="close-circle" size={24} color="white" />
-    </TouchableOpacity>
-    
-    {/* Bouton pour envoyer comme snap */}
-    <TouchableOpacity 
-      style={styles.sendAsSnapButton}
-      onPress={handleSendSnap}
-      disabled={sending}
-    >
-      {sending ? (
-        <ActivityIndicator size="small" color="white" />
-      ) : (
-        <>
-          <Ionicons name="flash" size={16} color="white" />
-          <Text style={styles.sendAsSnapText}>Envoyer comme Snap</Text>
-        </>
-      )}
-    </TouchableOpacity>
-  </View>
-)}
+          <View style={styles.mediaPreviewContainer}>
+            <Image 
+              source={{ uri: media.uri }} 
+              style={styles.mediaPreview}
+            />
+            <TouchableOpacity 
+              style={styles.removeMediaButton}
+              onPress={() => setMedia(null)}
+            >
+              <Ionicons name="close-circle" size={24} color="white" />
+            </TouchableOpacity>
+          </View>
+        )}
+        
         <View style={styles.inputContainer}>
           <TouchableOpacity 
             style={styles.attachButton}
@@ -947,8 +652,6 @@ const styles = StyleSheet.create({
   },
   mediaBubble: {
     padding: 3,
-    height:200,
-    width:250,
     overflow: 'hidden',
   },
   tempMessage: {
@@ -1056,52 +759,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     textAlign: 'center',
-  },
-  snapBubble: {
-    backgroundColor: '#FFFC00', // Couleur jaune de Snapchat
-    borderColor: '#FFED4A',
-    borderWidth: 1,
-    paddingVertical: 15,
-  },
-  snapIconContainer: {
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  snapText: {
-    fontSize: 14,
-    textAlign: 'center',
-    color: '#333',
-    marginBottom: 5,
-  },
-  openedSnapBubble: {
-    height: 'auto',
-    width: 'auto',
-  },
-  openedSnapContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 10,
-  },
-  openedSnapText: {
-    fontSize: 14,
-    marginTop: 5,
-  },
-  sendAsSnapButton: {
-    position: 'absolute',
-    bottom: 10,
-    right: 10,
-    backgroundColor: '#6C13B3',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 15,
-  },
-  sendAsSnapText: {
-    color: 'white',
-    fontSize: 12,
-    marginLeft: 5,
-  },
+  }
 });
 
 export default ConversationScreen;
